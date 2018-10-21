@@ -2,6 +2,8 @@
 
 A simple image steganography tool in javascript.  This tool will encode up to 255 characters in an image file.  
 
+Run in browser via rawgit: !!!TODO!!!
+
 # Method
 
 The encode_message js function is contained in the html page.  

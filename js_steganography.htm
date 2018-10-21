@@ -6,15 +6,16 @@
 
 <style>
 textarea {
-    background-color: white;
     flex-direction: column;
     cursor: text;
     white-space: pre-wrap;
     overflow-wrap: break-word;
     border-width: 1px;
     border-style: solid;
-    border-color: initial;
+    border-color: gray;
     border-image: initial;
+	background-color: black;
+	color: #00ffff;
     padding: 2px;
 }
 
@@ -29,12 +30,29 @@ canvas {
 	display: inline-block;
 }
 
+.msg {
+	background-color: #cccccc;
+	color: #010101;
+	max-width: 500px;
+	border: 1px solid gray;
+	padding: 2px;
+}
+
 td { 
 	border: 1px solid gray;
     border-collapse: collapse;
 }
+
+body {
+	background-color: #dddddd;
+}
+
 span {
 	color: red;
+}
+
+h1, h2, h3 {
+	color: black;
 }
 
 </style>
@@ -174,6 +192,7 @@ function decode_message(context, image) {
 	var enc_idx = 0;
 	var checksum = 0;
 	var elem = document.createElement('div');
+	elem.setAttribute("class", "msg");
 	
 	if(d.data.length == 0) {
 		console.log("Error: No image data for decoding.");
@@ -208,7 +227,7 @@ function decode_message(context, image) {
 	}
 	else {
 		//console.log(message);
-		elem.innerHTML = "<hr><p>" + message + "</p><hr>";
+		elem.innerHTML = "<p>" + message + "</p>";
 		document.body.appendChild(elem);	
 	}	
 
