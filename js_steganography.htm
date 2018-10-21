@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8"/>
+<title>JS Image Steganography</title>
+<body>
+
+<style>
+textarea {
+    background-color: white;
+    flex-direction: column;
+    cursor: text;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    border-width: 1px;
+    border-style: solid;
+    border-color: initial;
+    border-image: initial;
+    padding: 2px;
+}
+
+canvas {
+	padding: 2px;
+	border-style: dotted;
+	border-width: 1px;
+	border-color: gray;
+}
+
+.fieldset-auto-width {
+	display: inline-block;
+}
+
+td { 
+	border: 1px solid gray;
+    border-collapse: collapse;
+}
+span {
+	color: red;
+}
+
+</style>
+
+<script>
+
+function processImage(msg) {
+	var file = document.querySelector('input[type=file]').files[0];
+	var canvas = document.createElement('canvas');
+	var ctx	= canvas.getContext('2d');
+	var img = new Image();
+
+	img.onload = function() {
+		canvas.width = img.width;
+		canvas.height = img.height;
+		if(document.getElementById("encode").checked) {
+			if(encode_message(msg, ctx, img)) {
+				document.body.appendChild(canvas);
+			}
+		}
+		else if(document.getElementById("decode").checked) {
+			decode_message(ctx, img);	
+		}
+		else if(document.getElementById("invert").checked) {
+			invert_colors(ctx, img);
+			document.body.appendChild(canvas);
+		}
+	
+		//console.log(img.width);
+		//console.log(img.height);
+
+	} // end of onload
+
+	if(file) {
+		img.src = URL.createObjectURL(file);
+	}
+
+} // end of processImage
+
+//encode_message
+//
+//Encode a textual message in the pixels of an Image.
+//
+//Requires:
+// -- message: a String
+// -- context: a 2d context from a canvas
+// -- image:   an Image
+// -- canvas:  HTML5 canvas
+//
+//Each pixel contains an 8-bit Red, Green, Blue, and Alpha channel
+//
+//The 0th pixel contains:
+// -- Message length in the Red channel
+// -- The Green channel is unmodified, and used as an offset index to encode the first message byte
+//      o If the offset is 0, then the next pixel is used
+// -- Message checksum in the Blue channel
+//
+//At each n-th pixel that follows:
+// -- The message's high nibble overwrite the low nibble of the pixel's Red channel
+// -- The message's low nibble overwrite the low nibble of the pixel's Blue channel
+// -- The Green channel is again, skipped as an offset to the next location used to encode data.
+//      o If the offset is 0, then the next pixel is used
+//
+//Data is written until:
+// -- The entire message is encoded -or-
+// -- 255 bytes have been encoded -or-
+// -- The target image runs out of space
+//
+//Encoded message length and checksum are written to the 0th pixel last.
+//
+//Structure:
+//[pixel X| (Red color channel; Green color channel; Blue color channel; Alpha color channel) ]
+//[pixel 0| (Message length   ; Offset to next byte, Checksum          ; Unmodified         ) ]
+//[...]
+//[pixel N| (R| msg hi nibble ; Offset to next byte; B| msg lo nibble  ; Unmodified         ) ]
+//
+function encode_message(message, context, image) {
+	var written = 0; //number of bytes encoded
+	context.drawImage(image, 0, 0); //paint image to canvas
+	var d = context.getImageData(0, 0, image.width, image.height); //image pixels as raw data
+	var enc_idx = 0; //location to write message byte
+	var checksum = 0; //sum of all bytes written % 256
+	
+	if(d.data.length == 0) {
+		console.log("Error: No image data for encoding.");
+		alert("Error: Got an empty image");
+		return false;
+	}
+
+	if(message.length == 0) {
+		console.log("Error: No message data for encoding.");
+		alert("Error: Message is blank.");
+		return false;
+	}
+
+	enc_idx = Math.max(d.data[1]*4+1,5); //value of Green channel of pixel 0 | next pixel
+
+	for(var i = 0; i < message.length && i < 255; i+=1) {
+		var char = message.charCodeAt(i);
+		if(char > 255) { //can only encode an 8-bit value using this scheme
+			console.log("Can't encode character: " + fromCharCode(char));
+		} else {
+			//console.log(char);
+
+			var hi = (char >> 4);
+			var lo = char & 0x0F;
+
+			if(enc_idx + 1 >= d.data.length) { //will overrun image buffer
+				console.log("Data buffer overrun.");
+				break;
+			}
+			checksum += char;
+			d.data[enc_idx-1] = (d.data[enc_idx-1] & 0xF0) | hi;
+			d.data[enc_idx+1] = (d.data[enc_idx+1] & 0xF0) | lo;
+			enc_idx += Math.max((d.data[enc_idx]*4),4);
+			written += 1;
+		}
+	}
+
+	console.log("Wrote " + written + " characters.");
+	checksum %= 256;
+	d.data[0] = written;  //pixel 0 Red channel contains message length
+	d.data[2] = checksum; //pixel 0 Blue channel contains checksum
+
+	context.putImageData(d,0,0);
+	return true;
+}//end of encode_message
+
+//decode_message performs the inverse operation of the encode_message function
+// 
+//It will attempt to read a message, but will only return if the checksum is valid.
+//There is a small (1/256) random chance that a checksum will match for an invalid message.
+function decode_message(context, image) {
+	context.drawImage(image, 0, 0); //paint image to canvas
+	var message = '';
+	var d = context.getImageData(0, 0, image.width, image.height); //image pixels as raw data
+	var enc_idx = 0;
+	var checksum = 0;
+	var elem = document.createElement('div');
+	
+	if(d.data.length == 0) {
+		console.log("Error: No image data for decoding.");
+		alert("Error: Got an empty image");
+		return;
+	}
+
+	enc_idx = Math.max(d.data[1]*4+1,5); //value of Green channel of pixel 0 | next pixel
+
+	for(var i = 0; i < d.data[0]; i+=1) {
+
+		var lo, hi;
+
+		if(enc_idx + 1 >= d.data.length) { //will overrun image buffer
+			console.log("Data buffer overrun.");
+			break;
+		}
+		
+		hi = d.data[enc_idx-1] & 0x0F;
+		lo = d.data[enc_idx+1] & 0x0F;
+		enc_idx += Math.max((d.data[enc_idx]*4),4);
+
+		message += String.fromCharCode(hi<<4 | lo);
+		checksum += (hi<<4 | lo);
+	}
+
+	if(checksum % 256 != d.data[2]) {
+		console.log("Valid message format not detected.");
+		alert("Valid message format was not detected.");
+		//console.log(message);
+		message = '';
+	}
+	else {
+		//console.log(message);
+		elem.innerHTML = "<hr><p>" + message + "</p><hr>";
+		document.body.appendChild(elem);	
+	}	
+
+}//end of decode_message
+
+//invert all colors of a provided image.  alpha channel unmodified.
+function invert_colors(context, image) {
+	context.drawImage(image, 0, 0);
+	var d = context.getImageData(0, 0, image.width, image.height);
+	for(var i = 0; i < d.data.length; i+=4) {
+		d.data[i]   = 255 - d.data[i];
+		d.data[i+1] = 255 - d.data[i+1];
+		d.data[i+2] = 255 - d.data[i+2];
+	  //d.data[i+3] = 255; //alpha channel
+	}
+	context.putImageData(d,0,0);
+}//end of invert_colors
+
+//return random whole integer in range [lo, hi)
+//hi bound not inclusive
+function randInt(lo, hi) { 
+	return Math.floor(Math.random() * (hi-lo) + lo);
+}
+
+//randomize an image buffer
+function random_pad(context, image, canvas) {
+	var canvas  = document.createElement('canvas');
+	var context	= canvas.getContext('2d');
+	var image = new Image();
+	canvas.width = image.width = 255;
+	canvas.height = image.height = 255;
+	context.drawImage(image, 0, 0);
+	var d = context.getImageData(0, 0, image.width, image.height);
+	for(var i = 0; i < d.data.length; i+=4) {
+		d.data[i]   = randInt(0,256);
+		d.data[i+1] = randInt(0,256);
+		d.data[i+2] = randInt(0,256);
+	    d.data[i+3] = 255; //alpha channel
+	}
+	context.putImageData(d,0,0);
+	document.body.appendChild(canvas);
+}//end of random_pad
+
+function textCounter(field,field2,maxlimit) {
+	var countfield = document.getElementById(field2);
+ 	if(parseInt(countfield.innerHTML) > maxlimit) {
+		countfield.innerHTML = maxlimit.toString();
+		field.value = field.value.substring(0, maxlimit);
+		return false;
+ 	} else {
+		var val = maxlimit - field.value.length;
+		countfield.innerHTML = val.toString();
+	}
+}//end of textCounter
+
+//lock input when not encoding
+function input_off(value) {
+	document.getElementById("msgTextArea").disabled = value;
+}//end of input_off
+
+</script>
+
+<h1>Steganography | Hide a message in a picture</h1>
+<form>
+	<fieldset class="fieldset-auto-width">
+	<legend><h2>Select an action:</h2></legend>
+	<table>
+	<tr>
+	<td>
+		<div>
+			<input type="radio" id="encode" name="action" onclick="input_off(false)" checked/>
+			<label for="encode">Encode a message in a picture.</label><br>
+		</div>		
+		<div>
+			<input type="radio" id="decode" name="action" onclick="input_off(true)">
+			<label for="decode">Decode a hidden message.</label>
+		</div>
+		<div>
+			<input type="radio" id="invert" name="action" onclick="input_off(true)">
+			<label for="invert">Invert the colors of an image.</label>
+		</div>
+		<div>
+			<hr>Select the image to use:<br>
+			<input type="file" onchange="processImage(document.getElementById('msgTextArea').value)"><br>
+		</div>
+	</td>
+	<td>
+		<div>
+			<p>Enter text to encode (<span id="counter">209</span> characters remaining.)</p>
+			<textarea id="msgTextArea" 
+					style="resize:none; overflow: hidden" 
+					cols="50" rows="5" 
+					maxlength="255" wrap="hard" 
+					onkeyup="textCounter(this,'counter',255);"
+					autofocus>The quick brown fox jumps over the lazy dog...</textarea><br>	
+		</div>
+	</td>
+	</tr>
+	<tr>
+	<td colspan="2">
+		<div>
+			<br>
+			- or -
+			<button onclick="random_pad(); return false;">Generate a Random Image</button> that can be used to encode a message -or-
+			<button onclick="return true;">Reset this Page</button>
+		</div>
+	</td>
+	</tr>
+	</table>
+	</fieldset>
+</form>
+<h2>Outputs will appear below:</h2>
+
+</body>
+</html>
