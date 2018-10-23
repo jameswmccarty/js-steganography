@@ -2,7 +2,7 @@
 
 A simple image steganography tool in javascript.  This tool will encode up to 255 characters in an image file.  
 
-Run in browser via CodePen: https://codepen.io/anon/pen/WayLMQ
+Run in browser via on github.io: https://jameswmccarty.github.io/js-stego/js_steganography.htm
 
 # Method
 
